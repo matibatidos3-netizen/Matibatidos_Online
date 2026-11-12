@@ -20,11 +20,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configurar Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Configurar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
@@ -35,9 +34,9 @@ jobs:
         id: locate
         shell: bash
         run: |
-          echo "Buscando settings.gradle..."
+          echo "Buscando proyecto..."
 
-          FILE=$(find . -maxdepth 6 \
+          FILE=$(find . -maxdepth 8 \
             -type f \
             -name settings.gradle \
             -not -path './.git/*' \
@@ -45,27 +44,26 @@ jobs:
 
           if [ -z "$FILE" ]; then
             echo "ERROR: No se encontró settings.gradle"
-            echo "Archivos disponibles:"
-            find . -maxdepth 6 -type f | sort
+            find . -maxdepth 8 -type f | sort
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$FILE")
-          PROJECT_DIR=${PROJECT_DIR#./}
 
-          if [ "$PROJECT_DIR" = "" ]; then
+          if [ "$PROJECT_DIR" = "." ]; then
             PROJECT_DIR="."
+          else
+            PROJECT_DIR="${PROJECT_DIR#./}"
           fi
 
-          echo "Proyecto encontrado en: $PROJECT_DIR"
-
+          echo "Proyecto encontrado: $PROJECT_DIR"
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Verificar archivos del proyecto
+      - name: Verificar archivos
         working-directory: ${{ steps.locate.outputs.project_dir }}
         shell: bash
         run: |
-          echo "Verificando estructura..."
+          set -e
 
           REQUIRED_FILES=(
             "settings.gradle"
@@ -78,36 +76,32 @@ jobs:
 
           for FILE in "${REQUIRED_FILES[@]}"; do
             if [ -f "$FILE" ]; then
-              echo "OK: $FILE"
+              echo "CORRECTO: $FILE"
             else
               echo "ERROR: Falta $FILE"
               exit 1
             fi
           done
 
-          echo "Todos los archivos principales están presentes."
-
-      - name: Compilar APK
+      - name: Compilar aplicación Android
         working-directory: ${{ steps.locate.outputs.project_dir }}
-        shell: bash
         run: |
           gradle --no-daemon --stacktrace assembleDebug
 
-      - name: Verificar APK generada
+      - name: Verificar APK
         working-directory: ${{ steps.locate.outputs.project_dir }}
-        shell: bash
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "ERROR: No se encontró la APK."
+            echo "ERROR: No se generó la APK"
             exit 1
           fi
 
-          echo "APK generada correctamente."
+          echo "APK generada:"
           ls -lh "$APK"
 
-      - name: Guardar APK generada
+      - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
           name: Matibatidos-Online-APK
