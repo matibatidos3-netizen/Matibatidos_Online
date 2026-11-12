@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar código del repositorio
+      - name: Descargar proyecto
         uses: actions/checkout@v4
 
       - name: Configurar Java 17
@@ -24,30 +24,93 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
-      - name: Configurar Gradle
+      - name: Configurar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Verificar estructura del proyecto
+      - name: Localizar proyecto Android
+        id: locate
+        shell: bash
         run: |
-          echo "Verificando archivos..."
-          test -f settings.gradle
-          test -f build.gradle
-          test -f app/build.gradle
-          test -f app/src/main/AndroidManifest.xml
-          test -f app/src/main/java/com/matibatidos/online/MainActivity.java
-          test -f app/src/main/assets/www/index.html
-          echo "Estructura correcta."
+          echo "Buscando settings.gradle..."
+
+          FILE=$(find . -maxdepth 6 \
+            -type f \
+            -name settings.gradle \
+            -not -path './.git/*' \
+            | head -n 1)
+
+          if [ -z "$FILE" ]; then
+            echo "ERROR: No se encontró settings.gradle"
+            echo "Archivos disponibles:"
+            find . -maxdepth 6 -type f | sort
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$FILE")
+          PROJECT_DIR=${PROJECT_DIR#./}
+
+          if [ "$PROJECT_DIR" = "" ]; then
+            PROJECT_DIR="."
+          fi
+
+          echo "Proyecto encontrado en: $PROJECT_DIR"
+
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Verificar archivos del proyecto
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
+        run: |
+          echo "Verificando estructura..."
+
+          REQUIRED_FILES=(
+            "settings.gradle"
+            "build.gradle"
+            "app/build.gradle"
+            "app/src/main/AndroidManifest.xml"
+            "app/src/main/java/com/matibatidos/online/MainActivity.java"
+            "app/src/main/assets/www/index.html"
+          )
+
+          for FILE in "${REQUIRED_FILES[@]}"; do
+            if [ -f "$FILE" ]; then
+              echo "OK: $FILE"
+            else
+              echo "ERROR: Falta $FILE"
+              exit 1
+            fi
+          done
+
+          echo "Todos los archivos principales están presentes."
 
       - name: Compilar APK
-        run: gradle --no-daemon assembleDebug
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
+        run: |
+          gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Verificar APK generada
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: No se encontró la APK."
+            exit 1
+          fi
+
+          echo "APK generada correctamente."
+          ls -lh "$APK"
 
       - name: Guardar APK generada
         uses: actions/upload-artifact@v4
         with:
           name: Matibatidos-Online-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ github.workspace }}/${{ steps.locate.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
