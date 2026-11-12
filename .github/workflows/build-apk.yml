@@ -12,11 +12,11 @@ permissions:
 
 jobs:
   build:
-    name: Compilar aplicación Android
+    name: Compilar Matibatidos Online
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar proyecto
+      - name: Descargar repositorio
         uses: actions/checkout@v4
 
       - name: Configurar Java 17
@@ -25,56 +25,95 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar Android SDK 35
+        run: |
+          sdkmanager --install \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
       - name: Configurar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Localizar proyecto Android
+      - name: Localizar o extraer proyecto
         id: locate
         shell: bash
         run: |
-          echo "Buscando proyecto..."
+          set -e
 
-          FILE=$(find . -maxdepth 8 \
+          echo "Buscando proyecto Android..."
+
+          PROJECT_FILE=$(find . \
             -type f \
             -name settings.gradle \
             -not -path './.git/*' \
             | head -n 1)
 
-          if [ -z "$FILE" ]; then
-            echo "ERROR: No se encontró settings.gradle"
-            find . -maxdepth 8 -type f | sort
+          if [ -z "$PROJECT_FILE" ]; then
+
+            echo "No se encontraron archivos extraídos."
+            echo "Buscando archivo ZIP..."
+
+            ZIP_FILE=$(find . \
+              -type f \
+              -iname '*.zip' \
+              -not -path './.git/*' \
+              | head -n 1)
+
+            if [ -z "$ZIP_FILE" ]; then
+              echo "ERROR: No se encontró ningún ZIP."
+              echo "Archivos disponibles:"
+              find . -maxdepth 5 -type f | sort
+              exit 1
+            fi
+
+            echo "ZIP encontrado: $ZIP_FILE"
+
+            mkdir -p "$RUNNER_TEMP/MatibatidosSource"
+
+            unzip -o "$ZIP_FILE" \
+              -d "$RUNNER_TEMP/MatibatidosSource"
+
+            PROJECT_FILE=$(find \
+              "$RUNNER_TEMP/MatibatidosSource" \
+              -type f \
+              -name settings.gradle \
+              | head -n 1)
+          fi
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: El ZIP no contiene settings.gradle."
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$FILE")
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
 
-          if [ "$PROJECT_DIR" = "." ]; then
-            PROJECT_DIR="."
-          else
-            PROJECT_DIR="${PROJECT_DIR#./}"
-          fi
+          echo "Proyecto localizado en: $PROJECT_DIR"
 
-          echo "Proyecto encontrado: $PROJECT_DIR"
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Verificar archivos
+      - name: Verificar estructura Android
         working-directory: ${{ steps.locate.outputs.project_dir }}
         shell: bash
         run: |
           set -e
 
-          REQUIRED_FILES=(
+          FILES=(
             "settings.gradle"
             "build.gradle"
             "app/build.gradle"
             "app/src/main/AndroidManifest.xml"
             "app/src/main/java/com/matibatidos/online/MainActivity.java"
             "app/src/main/assets/www/index.html"
+            "app/src/main/assets/www/styles.css"
+            "app/src/main/assets/www/app.js"
           )
 
-          for FILE in "${REQUIRED_FILES[@]}"; do
+          for FILE in "${FILES[@]}"; do
             if [ -f "$FILE" ]; then
               echo "CORRECTO: $FILE"
             else
@@ -83,28 +122,39 @@ jobs:
             fi
           done
 
-      - name: Compilar aplicación Android
+          echo "Verificación completada."
+
+      - name: Comprobar versiones
+        run: |
+          java -version
+          gradle --version
+          sdkmanager --version
+
+      - name: Compilar APK Android
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: |
-          gradle --no-daemon --stacktrace assembleDebug
+          gradle \
+            --no-daemon \
+            --stacktrace \
+            assembleDebug
 
-      - name: Verificar APK
+      - name: Verificar archivo APK
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: No se generó la APK"
+          if [ ! -s "$APK" ]; then
+            echo "ERROR: No se generó la APK."
             exit 1
           fi
 
-          echo "APK generada:"
+          echo "APK generada correctamente:"
           ls -lh "$APK"
 
-      - name: Guardar APK
+      - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
           name: Matibatidos-Online-APK
-          path: ${{ github.workspace }}/${{ steps.locate.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.locate.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
