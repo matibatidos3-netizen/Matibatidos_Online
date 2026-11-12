@@ -1,0 +1,53 @@
+name: Construir APK Matibatidos Online
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compilar aplicación Android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Verificar estructura del proyecto
+        run: |
+          echo "Verificando archivos..."
+          test -f settings.gradle
+          test -f build.gradle
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/matibatidos/online/MainActivity.java
+          test -f app/src/main/assets/www/index.html
+          echo "Estructura correcta."
+
+      - name: Compilar APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Guardar APK generada
+        uses: actions/upload-artifact@v4
+        with:
+          name: Matibatidos-Online-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
